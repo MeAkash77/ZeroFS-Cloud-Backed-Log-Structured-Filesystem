@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#05070c">
+<meta name="description" content="ZeroFS — a log-structured filesystem for S3-compatible object storage. Interactive architecture and filesystem simulation.">
+<title>ZeroFS — Object Storage. Filesystem Performance.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+:root{
+  --bg:#05070c;--panel:#0a0f18;--panel2:#0d1420;--line:rgba(140,190,255,.14);
+  --text:#edf5ff;--muted:#8191a8;--cyan:#5ee7ff;--blue:#4c8dff;--violet:#9d7cff;
+  --green:#65f2ae;--amber:#ffd166;--red:#ff647c;--shadow:0 25px 80px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:20;opacity:.12;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:80px 80px;mask-image:linear-gradient(to bottom,#000,transparent 85%)}
+a{color:inherit;text-decoration:none}button{font:inherit;color:inherit}
+#space{position:fixed;inset:0;z-index:-2;background:radial-gradient(circle at 50% 18%,rgba(52,128,255,.12),transparent 32%),radial-gradient(circle at 80% 70%,rgba(157,124,255,.08),transparent 30%),#05070c}
+#three{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.9}
+.nav{position:fixed;top:0;left:0;right:0;height:76px;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:0 5vw;background:linear-gradient(180deg,rgba(5,7,12,.94),rgba(5,7,12,.45));backdrop-filter:blur(18px);border-bottom:1px solid rgba(150,200,255,.08)}
+.brand{display:flex;gap:12px;align-items:center;font-weight:900;letter-spacing:.08em}.brandmark{width:32px;height:32px;border:1px solid rgba(94,231,255,.7);border-radius:9px;position:relative;box-shadow:0 0 25px rgba(94,231,255,.18)}.brandmark:before,.brandmark:after{content:"";position:absolute;border:1px solid var(--cyan);border-radius:5px;inset:6px}.brandmark:after{inset:10px;border-color:var(--violet)}
+.navlinks{display:flex;gap:28px;color:#9aabc0;font-size:13px}.navlinks a:hover{color:white}.navcta{border:1px solid rgba(94,231,255,.3);background:rgba(94,231,255,.07);padding:10px 15px;border-radius:10px;cursor:pointer}
+.hero{min-height:100vh;padding:150px 5vw 70px;display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:center;max-width:1500px;margin:auto}
+.eyebrow{font:12px "DM Mono",monospace;color:var(--cyan);letter-spacing:.18em;text-transform:uppercase}.hero h1{font-size:clamp(54px,7.5vw,112px);line-height:.88;letter-spacing:-.07em;margin:20px 0}.hero h1 span{background:linear-gradient(110deg,#fff 25%,var(--cyan),#8d78ff 75%);-webkit-background-clip:text;background-clip:text;color:transparent}.hero p{font-size:18px;line-height:1.7;color:#9cacbf;max-width:670px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}.btn{border:1px solid rgba(255,255,255,.13);background:#0b111b;border-radius:12px;padding:14px 18px;cursor:pointer;transition:.25s;display:inline-flex;align-items:center;gap:9px}.btn:hover{transform:translateY(-2px);border-color:rgba(94,231,255,.45);box-shadow:0 12px 35px rgba(40,140,255,.12)}.btn.primary{background:linear-gradient(120deg,#1b6fff,#694cff);border-color:transparent;box-shadow:0 12px 40px rgba(76,141,255,.25)}.hero-note{font:11px "DM Mono",monospace;color:#66788e;margin-top:18px}
+.hero-card{height:560px;border:1px solid rgba(140,190,255,.14);border-radius:28px;background:linear-gradient(145deg,rgba(16,26,41,.82),rgba(5,9,16,.55));box-shadow:var(--shadow);position:relative;overflow:hidden;transform:perspective(1200px) rotateY(-5deg)}.hero-card:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 48%,rgba(94,231,255,.09),transparent 30%)}.orbit{position:absolute;inset:12%;border:1px solid rgba(94,231,255,.14);border-radius:50%;transform:rotateX(67deg);animation:spin 16s linear infinite}.orbit.o2{inset:21%;border-color:rgba(157,124,255,.18);animation-duration:10s;animation-direction:reverse}.core{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:190px;height:190px;border-radius:36px;background:linear-gradient(145deg,#14263a,#090f19);border:1px solid rgba(94,231,255,.45);box-shadow:0 0 80px rgba(94,231,255,.2),inset 0 0 35px rgba(76,141,255,.12);display:grid;place-items:center;z-index:3}.core:before{content:"";position:absolute;inset:17px;border-radius:27px;border:1px solid rgba(157,124,255,.28);animation:pulse 2.2s ease-in-out infinite}.core b{font-size:25px;letter-spacing:.08em}.core small{position:absolute;bottom:30px;color:var(--cyan);font:10px "DM Mono"}.node{position:absolute;width:118px;padding:12px;border:1px solid rgba(150,200,255,.15);background:rgba(9,15,24,.88);backdrop-filter:blur(10px);border-radius:14px;text-align:center;font-size:11px;z-index:4;box-shadow:0 12px 30px rgba(0,0,0,.3)}.node span{display:block;color:#70829a;font:9px "DM Mono";margin-top:5px}.n1{top:8%;left:7%}.n2{top:10%;right:7%}.n3{bottom:11%;left:10%}.n4{bottom:9%;right:10%}.beam{position:absolute;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);width:42%;left:29%;top:50%;opacity:.45;filter:drop-shadow(0 0 8px var(--cyan));animation:beam 2s linear infinite}.b2{transform:rotate(90deg)}.packet{position:absolute;width:7px;height:7px;background:white;border-radius:50%;box-shadow:0 0 18px var(--cyan);z-index:6;animation:packet 2.4s linear infinite}.p1{left:24%;top:49%}.p2{left:70%;top:49%;animation-delay:1s}.stats-strip{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);max-width:1400px;margin:0 auto}.stat{padding:24px 20px;border-right:1px solid var(--line)}.stat:last-child{border:0}.stat strong{font-size:24px}.stat span{display:block;color:#6e7f95;font:10px "DM Mono";letter-spacing:.12em;margin-top:5px}
+section{max-width:1400px;margin:auto;padding:120px 5vw}.section-head{max-width:800px;margin-bottom:50px}.kicker{color:var(--cyan);font:11px "DM Mono";letter-spacing:.18em;text-transform:uppercase}.section-head h2{font-size:clamp(38px,5vw,70px);letter-spacing:-.055em;line-height:.95;margin:13px 0}.section-head p{color:#8798ad;line-height:1.75;font-size:16px}
+.demo-wrap{border:1px solid rgba(140,190,255,.16);border-radius:26px;background:rgba(8,13,22,.88);box-shadow:var(--shadow);overflow:hidden}.demo-top{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 20px}.traffic{display:flex;gap:7px}.traffic i{width:9px;height:9px;border-radius:50%;background:#283545}.traffic i:nth-child(2){background:#53657a}.traffic i:nth-child(3){background:#788da5}.demo-title{font:11px "DM Mono";color:#8da0b7}.live{color:var(--green);font:10px "DM Mono"}.demo-body{display:grid;grid-template-columns:250px 1fr 270px;min-height:610px}.sidebar{border-right:1px solid var(--line);padding:20px}.side-title{font:10px "DM Mono";color:#5e7189;letter-spacing:.14em;margin-bottom:15px}.file{padding:11px;border:1px solid transparent;border-radius:10px;color:#9bacbf;display:flex;justify-content:space-between;gap:8px;margin-bottom:5px;cursor:pointer}.file:hover,.file.active{background:rgba(94,231,255,.06);border-color:rgba(94,231,255,.12);color:#fff}.file small{font:9px "DM Mono";color:#61748a}.stage{position:relative;padding:24px;overflow:hidden;background:radial-gradient(circle at 50% 48%,rgba(76,141,255,.07),transparent 45%)}.stage-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(100,160,220,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(100,160,220,.04) 1px,transparent 1px);background-size:40px 40px;mask-image:linear-gradient(#000,transparent)}.pipeline{position:relative;height:440px;display:flex;align-items:center;justify-content:space-between;gap:12px}.pipe-node{width:120px;min-width:100px;height:100px;border-radius:18px;border:1px solid rgba(140,190,255,.16);background:linear-gradient(145deg,#111d2d,#090f18);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;z-index:3;box-shadow:0 15px 45px rgba(0,0,0,.35);transition:.35s}.pipe-node.active{border-color:rgba(94,231,255,.65);box-shadow:0 0 45px rgba(94,231,255,.16)}.pipe-node b{font-size:12px}.pipe-node span{font:9px "DM Mono";color:#667990;margin-top:8px}.pipe-line{height:1px;flex:1;background:rgba(120,160,200,.18);position:relative}.pipe-line:after{content:"";position:absolute;left:0;top:-2px;width:6px;height:5px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:travel 1.5s linear infinite}.packet-fx{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 22px var(--cyan);display:none;z-index:8}.demo-controls{position:absolute;bottom:18px;left:24px;right:24px;display:flex;gap:8px;flex-wrap:wrap}.mini{font-size:11px;padding:10px 12px;border:1px solid var(--line);background:#0b111a;border-radius:9px;cursor:pointer}.mini:hover{border-color:rgba(94,231,255,.45)}.telemetry{border-left:1px solid var(--line);padding:20px;background:rgba(4,8,14,.45)}.metric{padding:15px 0;border-bottom:1px solid rgba(140,190,255,.08)}.metric label{display:flex;justify-content:space-between;color:#708198;font:10px "DM Mono";text-transform:uppercase}.metric strong{font-size:25px;margin-top:6px;display:block}.bar{height:5px;background:#121b28;border-radius:5px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;width:var(--w);background:linear-gradient(90deg,var(--blue),var(--cyan));box-shadow:0 0 12px rgba(94,231,255,.35);transition:width .6s}.log{font:9px "DM Mono";color:#63768e;line-height:1.9;height:160px;overflow:hidden;margin-top:12px}.log b{color:#8da2ba}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{border:1px solid var(--line);background:linear-gradient(145deg,rgba(14,22,34,.86),rgba(7,11,18,.86));border-radius:20px;padding:24px;min-height:210px;transition:.3s}.card:hover{transform:translateY(-5px);border-color:rgba(94,231,255,.28);box-shadow:0 20px 60px rgba(0,0,0,.3)}.num{font:10px "DM Mono";color:var(--cyan)}.card h3{font-size:21px;margin:18px 0 10px}.card p{color:#77899f;line-height:1.7;font-size:13px}
+.arch{border:1px solid var(--line);border-radius:25px;background:#080d15;position:relative;min-height:670px;overflow:hidden}.arch-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(94,231,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(94,231,255,.045) 1px,transparent 1px);background-size:50px 50px;transform:perspective(700px) rotateX(55deg) scale(1.5);transform-origin:50% 100%;opacity:.55}.arch-node{position:absolute;width:160px;padding:18px;border-radius:16px;border:1px solid rgba(140,190,255,.18);background:rgba(9,16,26,.94);box-shadow:0 20px 55px rgba(0,0,0,.4);text-align:center;z-index:4}.arch-node b{font-size:12px}.arch-node small{display:block;color:#63758b;font:9px "DM Mono";margin-top:7px}.arch-core{left:50%;top:48%;transform:translate(-50%,-50%);width:230px;height:150px;display:grid;place-items:center;border-color:rgba(94,231,255,.45);box-shadow:0 0 80px rgba(94,231,255,.12)}.arch-n1{left:7%;top:13%}.arch-n2{left:7%;bottom:13%}.arch-n3{right:7%;top:13%}.arch-n4{right:7%;bottom:13%}.arch-store{left:50%;bottom:5%;transform:translateX(-50%);width:260px}.connector{position:absolute;height:1px;background:linear-gradient(90deg,transparent,rgba(94,231,255,.55),transparent);transform-origin:left center;z-index:2}.c1{width:39%;left:18%;top:29%;transform:rotate(19deg)}.c2{width:39%;left:18%;top:69%;transform:rotate(-19deg)}.c3{width:39%;right:18%;top:29%;transform:rotate(161deg)}.c4{width:39%;right:18%;top:69%;transform:rotate(199deg)}.c5{width:27%;left:37%;top:57%;transform:rotate(89deg)}
+.flow{display:grid;grid-template-columns:1fr 1fr;gap:18px}.flow-panel{border:1px solid var(--line);border-radius:22px;background:#080d15;padding:25px;min-height:470px}.flow-panel h3{margin:0 0 8px}.flow-panel>p{color:#71839a;font-size:13px;line-height:1.6}.blocks{display:flex;gap:6px;flex-wrap:wrap;margin-top:30px}.block{width:54px;height:54px;border-radius:9px;border:1px solid rgba(94,231,255,.22);background:linear-gradient(145deg,#122336,#0a111b);display:grid;place-items:center;font:8px "DM Mono";transition:.3s}.block.hot{background:linear-gradient(145deg,#174568,#17274a);box-shadow:0 0 22px rgba(94,231,255,.18);transform:translateY(-4px)}.stage-arrow{text-align:center;color:var(--cyan);font:24px "DM Mono";margin:20px}.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px}.compare .side{border:1px solid var(--line);border-radius:20px;padding:25px;background:#080d15}.compare h3{margin-top:0}.bad{color:#ff8596}.good{color:var(--green)}.code{font:12px "DM Mono";line-height:2;color:#9eb0c4;background:#050910;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:16px}.code .c{color:#5f738c}.code .g{color:var(--green)}.code .b{color:var(--cyan)}
+.ha{display:grid;grid-template-columns:1fr 1fr;gap:18px}.ha-panel{border:1px solid var(--line);border-radius:22px;background:#080d15;padding:25px;min-height:360px;position:relative;overflow:hidden}.servers{display:flex;justify-content:center;align-items:center;gap:25px;height:230px}.server{width:150px;height:120px;border:1px solid rgba(94,231,255,.25);border-radius:16px;background:linear-gradient(145deg,#132033,#080e17);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}.server i{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 15px var(--green);position:absolute;top:14px;right:14px}.server.failed i{background:var(--red);box-shadow:0 0 15px var(--red)}.server small{font:9px "DM Mono";color:#65778d;margin-top:7px}.replicate{height:1px;width:70px;background:linear-gradient(90deg,var(--cyan),var(--violet));box-shadow:0 0 12px var(--cyan);position:relative}.replicate:after{content:"↔";position:absolute;left:50%;top:-13px;transform:translateX(-50%);color:#9db7d5;font:13px "DM Mono"}.ha-btn{position:absolute;bottom:22px;left:25px}.status{font:11px "DM Mono";color:#71859b}.status b{color:var(--green)}
+.backend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.backend{border:1px solid var(--line);padding:20px;border-radius:18px;background:#080d15;cursor:pointer;transition:.3s}.backend:hover,.backend.selected{border-color:rgba(94,231,255,.45);transform:translateY(-4px)}.backend .dot{width:9px;height:9px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 12px var(--green);margin-right:8px}.backend h3{font-size:15px}.backend p{color:#687a91;font-size:11px;line-height:1.6}.backend-detail{margin-top:15px;border:1px solid var(--line);border-radius:18px;background:#080d15;padding:20px;font:11px "DM Mono";color:#8ba0b8;min-height:100px}.protocols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.proto{padding:23px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#0d1725,#080d15);min-height:170px}.proto strong{font-size:18px}.proto p{color:#71839a;font-size:12px;line-height:1.6}.test-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.tests{border:1px solid var(--line);border-radius:22px;background:#080d15;padding:25px}.test{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid rgba(140,190,255,.07);font-size:13px}.pass{font:10px "DM Mono";color:var(--green)}.test:last-child{border-bottom:0}.stack{display:flex;flex-wrap:wrap;gap:9px}.tag{border:1px solid rgba(140,190,255,.14);background:#0a111b;padding:10px 12px;border-radius:10px;color:#9aacbf;font:11px "DM Mono"}.recruiter{border:1px solid rgba(94,231,255,.22);border-radius:28px;padding:45px;background:radial-gradient(circle at 80% 20%,rgba(76,141,255,.14),transparent 35%),linear-gradient(145deg,#0c1522,#070b12);box-shadow:var(--shadow)}.recruiter h2{font-size:clamp(35px,5vw,62px);letter-spacing:-.05em;max-width:850px;margin:10px 0 18px}.recruiter p{color:#8496ac;max-width:800px;line-height:1.75}.bullet-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:30px}.bullet{border-top:1px solid rgba(94,231,255,.25);padding-top:14px}.bullet b{font-size:11px}.bullet span{display:block;color:#6e8198;font-size:11px;line-height:1.5;margin-top:7px}
+footer{border-top:1px solid var(--line);padding:35px 5vw;display:flex;justify-content:space-between;color:#64768d;font:11px "DM Mono";max-width:1500px;margin:auto}.modal{position:fixed;inset:0;z-index:100;background:rgba(1,4,8,.82);backdrop-filter:blur(18px);display:none;align-items:center;justify-content:center;padding:20px}.modal.show{display:flex}.modal-box{width:min(1200px,96vw);max-height:92vh;overflow:auto;border:1px solid rgba(140,190,255,.2);border-radius:24px;background:#070c14;box-shadow:0 40px 130px rgba(0,0,0,.7)}.modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.close{border:1px solid var(--line);background:#0c131e;border-radius:9px;padding:8px 11px;cursor:pointer}.modal-content{padding:22px}.sim{display:grid;grid-template-columns:1fr 300px;gap:15px}.sim-main{border:1px solid var(--line);border-radius:18px;min-height:520px;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 38%),#060b12;position:relative;overflow:hidden}.sim-main:before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(94,231,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(94,231,255,.035) 1px,transparent 1px);background-size:45px 45px}.sim-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-around;padding:35px}.sim-node{width:135px;height:105px;border:1px solid rgba(140,190,255,.18);border-radius:16px;background:#0b1420;display:grid;place-items:center;text-align:center;z-index:3}.sim-node b{font-size:11px}.sim-node span{font:8px "DM Mono";color:#64778e}.sim-track{position:absolute;left:18%;right:18%;height:1px;background:rgba(140,190,255,.15);top:50%}.sim-packet{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--cyan);box-shadow:0 0 25px var(--cyan);z-index:4;display:none}.sim-packet.go{display:block;animation:simtravel 1.2s linear forwards}.sim-side{border:1px solid var(--line);border-radius:18px;background:#080e16;padding:18px}.sim-side h3{margin:0 0 15px;font-size:13px}.action-list{display:grid;gap:8px}.action-list button{padding:12px;border-radius:10px;border:1px solid var(--line);background:#0b131e;text-align:left;cursor:pointer;font-size:11px}.action-list button:hover{border-color:rgba(94,231,255,.45)}.sim-log{font:9px "DM Mono";line-height:1.9;color:#687b92;margin-top:18px;height:205px;overflow:hidden}.toast{position:fixed;right:20px;bottom:20px;z-index:120;padding:13px 16px;border:1px solid rgba(94,231,255,.25);border-radius:12px;background:#09131f;box-shadow:var(--shadow);font:11px "DM Mono";transform:translateY(120px);opacity:0}.toast.show{animation:toast .25s ease forwards}
+@keyframes spin{to{transform:rotateX(67deg) rotateZ(360deg)}}@keyframes pulse{50%{transform:scale(1.05);opacity:.45}}@keyframes beam{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}@keyframes packet{0%{transform:translateX(0)}50%{transform:translateX(230px)}100%{transform:translateX(0)}}@keyframes travel{0%{left:0}100%{left:100%}}@keyframes simtravel{0%{left:18%;opacity:0}10%{opacity:1}90%{opacity:1}100%{left:80%;opacity:0}}@keyframes toast{to{transform:translateY(0);opacity:1}}
+@media(max-width:1100px){.hero{grid-template-columns:1fr}.hero-card{height:500px}.demo-body{grid-template-columns:190px 1fr}.telemetry{display:none}.backend-grid,.protocols{grid-template-columns:repeat(2,1fr)}.bullet-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.navlinks{display:none}.hero{padding-top:120px}.hero-card{height:400px}.core{width:140px;height:140px}.node{width:90px}.n1,.n3{left:3%}.n2,.n4{right:3%}.stats-strip{grid-template-columns:repeat(2,1fr)}.stat{border-bottom:1px solid var(--line)}.demo-body{grid-template-columns:1fr}.sidebar{display:none}.pipeline{flex-direction:column;height:470px}.pipe-line{width:1px;height:45px;flex:none}.pipe-line:after{animation:vertical .9s linear infinite}.cards,.flow,.compare,.ha,.test-grid,.sim{grid-template-columns:1fr}.arch{min-height:850px}.arch-node{width:130px}.arch-core{width:190px}.arch-store{bottom:4%}.arch-n1,.arch-n2{left:3%}.arch-n3,.arch-n4{right:3%}.c1,.c2{width:25%;left:26%}.c3,.c4{width:25%;right:26%}.modal{padding:8px}.modal-box{max-height:96vh}.sim-main{min-height:430px}.sim-stage{padding:15px}.sim-node{width:100px;height:80px}.bullet-grid{grid-template-columns:1fr}.section-head h2{font-size:42px}}
+@keyframes vertical{0%{top:0}100%{top:100%}}
+</style>
+</head>
+<body>
+<div id="space"></div><canvas id="three"></canvas>
+
+<nav class="nav">
+  <a class="brand" href="#"><i class="brandmark"></i>ZEROFS</a>
+  <div class="navlinks">
+    <a href="#demo">Live Demo</a><a href="#architecture">Architecture</a><a href="#data">Data Path</a><a href="#reliability">Reliability</a><a href="#engineering">Engineering</a>
+  </div>
+  <button class="navcta" onclick="openDemo()">Launch Demo ↗</button>
+</nav>
+
+<header class="hero">
+  <div>
+    <div class="eyebrow">Log-structured filesystem for S3-compatible storage</div>
+    <h1>Object Storage.<br><span>Filesystem Performance.</span></h1>
+    <p>ZeroFS makes cloud object storage behave like a normal POSIX filesystem — with NFS, 9P and NBD access, compression, encryption, caching, recovery and optional high availability.</p>
+    <div class="actions">
+      <button class="btn primary" onclick="openDemo()">▶ Launch Interactive Demo</button>
+      <a class="btn" href="#architecture">Explore Architecture ↓</a>
+    </div>
+    <div class="hero-note">Browser simulation • no credentials • no backend required</div>
+  </div>
+  <div class="hero-card">
+    <div class="orbit"></div><div class="orbit o2"></div>
+    <div class="node n1">NFS Client<span>native filesystem access</span></div>
+    <div class="node n2">9P Client<span>filesystem protocol</span></div>
+    <div class="node n3">NBD<span>raw block device</span></div>
+    <div class="node n4">Web UI<span>browser file manager</span></div>
+    <div class="beam"></div><div class="beam b2"></div><div class="packet p1"></div><div class="packet p2"></div>
+    <div class="core"><b>ZEROFS</b><small>VIRTUAL FILESYSTEM</small></div>
+  </div>
+</header>
+
+<div class="stats-strip">
+  <div class="stat"><strong>32 KiB</strong><span>EXTENT SIZE</span></div>
+  <div class="stat"><strong>256 MiB</strong><span>MAX SEGMENT</span></div>
+  <div class="stat"><strong>3+</strong><span>ACCESS PATHS</span></div>
+  <div class="stat"><strong>8,662</strong><span>POSIX CASES IN CI</span></div>
+  <div class="stat"><strong>HA</strong><span>LEADER / STANDBY</span></div>
+</div>
+
+<section id="demo">
+  <div class="section-head">
+    <div class="kicker">01 / See it work</div>
+    <h2>A filesystem you can understand in one interaction.</h2>
+    <p>Click an operation and watch a file move through the ZeroFS pipeline. The animation is a browser-side simulation of the real architecture described by the project.</p>
+  </div>
+  <div class="demo-wrap">
+    <div class="demo-top"><div class="traffic"><i></i><i></i><i></i></div><div class="demo-title">ZEROFS / LIVE WORKLOAD VISUALIZER</div><div class="live">● SIMULATION ONLINE</div></div>
+    <div class="demo-body">
+      <aside class="sidebar">
+        <div class="side-title">FILESYSTEM</div>
+        <div class="file active"><span>📄 report.pdf</span><small>12.4M</small></div>
+        <div class="file"><span>📄 model.bin</span><small>248M</small></div>
+        <div class="file"><span>📁 datasets/</span><small>1.2G</small></div>
+        <div class="file"><span>📁 projects/</span><small>642M</small></div>
+        <div class="file"><span>📄 notes.txt</span><small>18K</small></div>
+        <div style="margin-top:25px" class="side-title">MOUNT</div>
+        <div class="code">/mnt/zerofs<br><span class="c">status:</span> <span class="g">mounted</span><br><span class="c">backend:</span> S3</div>
+      </aside>
+      <main class="stage">
+        <div class="stage-grid"></div>
+        <div style="position:relative;z-index:2;font:10px 'DM Mono';color:#5f738b">DATA PIPELINE / REQUEST TRACE</div>
+        <div class="pipeline">
+          <div class="pipe-node active" id="pn1"><b>APPLICATION</b><span>file operation</span></div>
+          <div class="pipe-line"></div>
+          <div class="pipe-node" id="pn2"><b>ZEROFS CORE</b><span>virtual filesystem</span></div>
+          <div class="pipe-line"></div>
+          <div class="pipe-node" id="pn3"><b>DATA LAYER</b><span>compress + encrypt</span></div>
+          <div class="pipe-line"></div>
+          <div class="pipe-node" id="pn4"><b>OBJECT STORE</b><span>S3-compatible</span></div>
+        </div>
+        <div class="packet-fx" id="demoPacket"></div>
+        <div class="demo-controls">
+          <button class="mini" onclick="simulate('upload')">↑ Upload File</button>
+          <button class="mini" onclick="simulate('read')">↓ Read File</button>
+          <button class="mini" onclick="simulate('delete')">× Delete File</button>
+          <button class="mini" onclick="simulate('cache')">⚡ Cache Hit</button>
+          <button class="mini" onclick="simulate('failover')">◈ Simulate Failover</button>
+        </div>
+      </main>
+      <aside class="telemetry">
+        <div class="side-title">LIVE TELEMETRY</div>
+        <div class="metric"><label>Request rate <span id="reqLabel">18.4K/s</span></label><strong id="req">18,420</strong><div class="bar"><i style="--w:76%"></i></div></div>
+        <div class="metric"><label>Cache hit <span>memory + disk</span></label><strong id="cacheVal">94.7%</strong><div class="bar"><i style="--w:94%"></i></div></div>
+        <div class="metric"><label>Storage <span>demo state</span></label><strong>1.24 TB</strong><div class="bar"><i style="--w:61%"></i></div></div>
+        <div class="metric"><label>Encryption <span>at rest</span></label><strong style="color:var(--green)">ACTIVE</strong></div>
+        <div class="log" id="log"><b>[12:04:21]</b> mount /mnt/zerofs<br><b>[12:04:22]</b> cache warm<br><b>[12:04:24]</b> object store connected<br><b>[12:04:26]</b> metadata manifest loaded<br><b>[12:04:29]</b> ready for requests<br></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><div class="kicker">02 / Why ZeroFS</div><h2>Hide object-storage complexity behind a familiar filesystem.</h2></div>
+  <div class="cards">
+    <article class="card"><div class="num">01</div><h3>POSIX-shaped access</h3><p>Applications can work with files and directories instead of learning an object API. ZeroFS exposes NFS and 9P, plus NBD for block access.</p></article>
+    <article class="card"><div class="num">02</div><h3>Object-backed durability</h3><p>File data and metadata live in the same object-storage system. No separate external database service is required.</p></article>
+    <article class="card"><div class="num">03</div><h3>Built-in data path</h3><p>Extents are compressed, encrypted and packed into immutable segment objects before upload.</p></article>
+    <article class="card"><div class="num">04</div><h3>Tiered caching</h3><p>Memory and disk cache tiers keep frequently accessed data close to the filesystem while object storage remains the durable backend.</p></article>
+    <article class="card"><div class="num">05</div><h3>High availability</h3><p>Optional leader/standby replication uses the same bucket and supports automatic takeover with writer-epoch fencing.</p></article>
+    <article class="card"><div class="num">06</div><h3>Filesystem-grade testing</h3><p>CI exercises POSIX suites, xfstests, kernel builds, stress workloads, ZFS and Jepsen-based recovery and HA scenarios.</p></article>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="section-head"><div class="kicker">03 / Architecture</div><h2>Multiple access protocols. One filesystem core.</h2><p>NFS, 9P, NBD and the browser Web UI converge on the same virtual filesystem layer, which then manages data segments, metadata and cache.</p></div>
+  <div class="arch">
+    <div class="arch-grid"></div>
+    <div class="arch-node arch-n1"><b>NFS CLIENT</b><small>native kernel filesystem access</small></div>
+    <div class="arch-node arch-n2"><b>NBD CLIENT</b><small>raw block device + TRIM</small></div>
+    <div class="arch-node arch-n3"><b>9P CLIENT</b><small>filesystem protocol over TCP / socket</small></div>
+    <div class="arch-node arch-n4"><b>WEB BROWSER</b><small>file manager + dashboard + terminal</small></div>
+    <div class="arch-node arch-core"><b>ZEROFS CORE</b><small>virtual filesystem • segment store • LSM metadata • local cache</small></div>
+    <div class="arch-node arch-store"><b>OBJECT STORAGE</b><small>S3 • GCS • Azure Blob • S3-compatible • local disk</small></div>
+    <div class="connector c1"></div><div class="connector c2"></div><div class="connector c3"></div><div class="connector c4"></div><div class="connector c5"></div>
+  </div>
+</section>
+
+<section id="data">
+  <div class="section-head"><div class="kicker">04 / Data path</div><h2>Watch one file become durable object data.</h2><p>ZeroFS splits file contents into 32 KiB extents, compresses and encrypts each extent, then packs frames into immutable segment objects up to 256 MiB.</p></div>
+  <div class="flow">
+    <div class="flow-panel">
+      <h3>1. File → extents</h3><p>A normal file becomes a stream of fixed-size data extents.</p>
+      <div class="blocks" id="extentBlocks"></div>
+      <div class="stage-arrow">↓</div>
+      <div class="code"><span class="c">file:</span> dataset.bin<br><span class="c">size:</span> 1 GiB<br><span class="c">extent:</span> <span class="b">32 KiB</span><br><span class="c">layout:</span> sequential extents</div>
+    </div>
+    <div class="flow-panel">
+      <h3>2. Extents → segment frames</h3><p>Compression happens before encryption; frames are packed into immutable segments.</p>
+      <div class="code" style="margin-top:30px"><span class="c">compress:</span> <span class="b">zstd-3</span> / lz4<br><span class="c">encrypt:</span> <span class="b">XChaCha20-Poly1305</span><br><span class="c">key derivation:</span> Argon2id<br><span class="c">segment:</span> <span class="b">≤ 256 MiB</span><br><span class="c">metadata:</span> LSM tree + extent pointers</div>
+      <div class="blocks" id="frameBlocks"></div>
+      <div class="stage-arrow">↓</div>
+      <div class="code"><span class="g">UPLOAD</span> → immutable object<br><span class="c">storage:</span> S3-compatible bucket</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><div class="kicker">05 / The simple explanation</div><h2>Normal file on the outside. Cloud object system underneath.</h2></div>
+  <div class="compare">
+    <div class="side"><h3 class="bad">Traditional object storage</h3><div class="code"><span class="c">PUT</span> object<br><span class="c">GET</span> object<br><span class="c">LIST</span> objects<br><span class="c">DELETE</span> object</div><p style="color:#73869b;line-height:1.7">The application has to think in objects, keys and buckets.</p></div>
+    <div class="side"><h3 class="good">With ZeroFS</h3><div class="code"><span class="g">open</span>("/data/report.pdf")<br><span class="g">read</span>(fd, buffer)<br><span class="g">write</span>(fd, data)<br><span class="g">rename</span>(src, dst)</div><p style="color:#73869b;line-height:1.7">The application works with a filesystem while ZeroFS handles the object-storage machinery underneath.</p></div>
+  </div>
+</section>
+
+<section id="reliability">
+  <div class="section-head"><div class="kicker">06 / Reliability</div><h2>Make failure visible. Then watch the system recover.</h2><p>ZeroFS supports optional leader/standby replication. The demo below intentionally breaks the leader and visualizes takeover.</p></div>
+  <div class="ha">
+    <div class="ha-panel">
+      <div class="status" id="haStatus">REPLICATION: <b>CONNECTED</b></div>
+      <div class="servers">
+        <div class="server" id="leader"><i></i><b>LEADER</b><small>serving writes</small></div>
+        <div class="replicate"></div>
+        <div class="server" id="standby"><i></i><b>STANDBY</b><small>replica synced</small></div>
+      </div>
+      <button class="mini ha-btn" onclick="runFailover()">Simulate Leader Failure</button>
+    </div>
+    <div class="ha-panel">
+      <h3>What the architecture protects</h3>
+      <div class="metric"><label>Replication</label><strong>Before ACK</strong></div>
+      <div class="metric"><label>Takeover</label><strong>Fenced</strong></div>
+      <div class="metric"><label>Storage</label><strong>Same bucket</strong></div>
+      <div class="metric"><label>Demo guarantee</label><strong style="color:var(--green)">No acknowledged write lost*</strong></div>
+      <p style="font-size:10px;color:#5f7188">*Shown as the project's tested HA design guarantee; this browser page is a visual simulation, not a live cluster.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><div class="kicker">07 / Backends</div><h2>One filesystem. Many storage backends.</h2></div>
+  <div class="backend-grid">
+    <div class="backend selected" onclick="selectBackend(this,'Amazon S3','s3://bucket/zerofs-data','AWS credentials + S3-compatible object API')"><span class="dot"></span><h3>Amazon S3</h3><p>Primary object-storage path.</p></div>
+    <div class="backend" onclick="selectBackend(this,'Google Cloud Storage','gs://bucket/path','Service account or ambient ADC')"><span class="dot"></span><h3>Google Cloud</h3><p>GCS object storage.</p></div>
+    <div class="backend" onclick="selectBackend(this,'Azure Blob','azure://container/path','Storage account credentials')"><span class="dot"></span><h3>Azure Blob</h3><p>Azure object storage.</p></div>
+    <div class="backend" onclick="selectBackend(this,'Local Disk','file:///path/to/storage','No cloud credentials required')"><span class="dot"></span><h3>Local Disk</h3><p>Filesystem-backed development mode.</p></div>
+  </div>
+  <div class="backend-detail" id="backendDetail">ACTIVE BACKEND → Amazon S3<br>URL → s3://bucket/zerofs-data<br>AUTH → AWS credentials + S3-compatible object API</div>
+</section>
+
+<section>
+  <div class="section-head"><div class="kicker">08 / Access layer</div><h2>Choose the interface that fits the workload.</h2></div>
+  <div class="protocols">
+    <div class="proto"><strong>NFS</strong><p>Native network filesystem access for standard Linux and Unix clients.</p></div>
+    <div class="proto"><strong>9P</strong><p>Filesystem protocol used by the core, Web UI and browser terminal path.</p></div>
+    <div class="proto"><strong>NBD</strong><p>Expose ZeroFS as a raw block device with TRIM and durable FLUSH/FUA semantics.</p></div>
+    <div class="proto"><strong>Web UI</strong><p>File manager, dashboard and in-browser Linux terminal through the web layer.</p></div>
+  </div>
+</section>
+
+<section id="engineering">
+  <div class="section-head"><div class="kicker">09 / Engineering depth</div><h2>More than a storage adapter.</h2><p>The repository includes filesystem protocols, object-backed metadata, encryption, compression, caching, HA, a browser UI and a large validation surface.</p></div>
+  <div class="test-grid">
+    <div class="tests">
+      <h3>Validation surface</h3>
+      <div class="test"><span>pjdfstest — POSIX cases</span><span class="pass">8,662 CASES</span></div>
+      <div class="test"><span>xfstests</span><span class="pass">CI</span></div>
+      <div class="test"><span>Linux kernel builds</span><span class="pass">CI</span></div>
+      <div class="test"><span>stress-ng</span><span class="pass">CI</span></div>
+      <div class="test"><span>ZFS over block devices</span><span class="pass">CI</span></div>
+      <div class="test"><span>Jepsen local filesystem</span><span class="pass">RECOVERY</span></div>
+      <div class="test"><span>Jepsen HA</span><span class="pass">FAILOVER</span></div>
+      <div class="test"><span>Deterministic simulation</span><span class="pass">FAULTS</span></div>
+    </div>
+    <div class="tests">
+      <h3>Technology map</h3>
+      <div class="stack">
+        <span class="tag">Rust</span><span class="tag">Tokio</span><span class="tag">Tonic</span><span class="tag">Protobuf</span>
+        <span class="tag">NFS</span><span class="tag">9P</span><span class="tag">NBD</span><span class="tag">FUSE</span>
+        <span class="tag">POSIX</span><span class="tag">S3</span><span class="tag">GCS</span><span class="tag">Azure Blob</span>
+        <span class="tag">SlateDB</span><span class="tag">LSM tree</span><span class="tag">zstd</span><span class="tag">lz4</span>
+        <span class="tag">XChaCha20-Poly1305</span><span class="tag">Argon2id</span><span class="tag">WebSocket</span><span class="tag">gRPC-Web</span>
+        <span class="tag">React</span><span class="tag">TypeScript</span><span class="tag">Vite</span><span class="tag">v86</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="recruiter">
+    <div class="kicker">10 / Recruiter view</div>
+    <h2>ZeroFS is a systems project with a clear product story.</h2>
+    <p>It takes a difficult infrastructure problem — presenting object storage as a filesystem — and combines protocol design, storage layout, metadata, caching, cryptography, compression, fault recovery and production-style validation behind one user-facing abstraction.</p>
+    <div class="bullet-grid">
+      <div class="bullet"><b>STORAGE</b><span>Object-backed immutable segments</span></div>
+      <div class="bullet"><b>SYSTEMS</b><span>POSIX semantics + multiple protocols</span></div>
+      <div class="bullet"><b>PERFORMANCE</b><span>Large-file throughput + small-file scale</span></div>
+      <div class="bullet"><b>RELIABILITY</b><span>Recovery, HA and deterministic faults</span></div>
+      <div class="bullet"><b>SECURITY</b><span>Compression + authenticated encryption</span></div>
+    </div>
+    <div class="actions" style="margin-top:35px">
+      <button class="btn primary" onclick="openDemo()">▶ Run the Demo Again</button>
+      <a class="btn" href="https://github.com/Barre/ZeroFS" target="_blank" rel="noopener">View Repository ↗</a>
+    </div>
+  </div>
+</section>
+
+<footer><span>ZEROFS / INTERACTIVE PROJECT EXPERIENCE</span><span>Browser simulation — architecture grounded in the project README</span></footer>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <div class="modal-head"><div><b>ZEROFS LIVE SIMULATOR</b><div style="font:9px 'DM Mono';color:#63768e;margin-top:5px">Explore how a file travels through the filesystem</div></div><button class="close" onclick="closeDemo()">ESC / CLOSE</button></div>
+    <div class="modal-content">
+      <div class="sim">
+        <div class="sim-main">
+          <div class="sim-stage">
+            <div class="sim-node"><b>YOUR APP</b><span>report.pdf</span></div>
+            <div class="sim-node"><b>ZEROFS</b><span>filesystem core</span></div>
+            <div class="sim-node"><b>OBJECT STORE</b><span>S3 / GCS / Azure</span></div>
+          </div>
+          <div class="sim-track"></div><div class="sim-packet" id="simPacket"></div>
+        </div>
+        <aside class="sim-side">
+          <h3>Choose an operation</h3>
+          <div class="action-list">
+            <button onclick="simAction('upload')">↑ Upload & persist a file</button>
+            <button onclick="simAction('read')">↓ Read a file</button>
+            <button onclick="simAction('compress')">◌ Compress extents</button>
+            <button onclick="simAction('encrypt')">⌁ Encrypt data</button>
+            <button onclick="simAction('cache')">⚡ Serve from cache</button>
+            <button onclick="simAction('failover')">◈ Trigger HA takeover</button>
+          </div>
+          <div class="sim-log" id="simLog"><b>READY</b><br>Choose an operation to begin.<br><br>All actions are visual simulations of the documented ZeroFS data path.</div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- Three.js ambient infrastructure scene ---------- */
+(function(){
+  const canvas=document.getElementById('three');
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,1000);
+  camera.position.set(0,0,28);
+  const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
+  const group=new THREE.Group(); scene.add(group);
+  const mat=new THREE.MeshBasicMaterial({color:0x4c8dff,wireframe:true,transparent:true,opacity:.13});
+  for(let i=0;i<28;i++){
+    const g=new THREE.IcosahedronGeometry(.35+Math.random()*1.4,1);
+    const m=new THREE.Mesh(g,mat.clone());
+    m.material.opacity=.035+Math.random()*.08;
+    m.position.set((Math.random()-.5)*36,(Math.random()-.5)*22,(Math.random()-.5)*18);
+    m.rotation.set(Math.random()*6,Math.random()*6,Math.random()*6);
+    m.userData={s:.001+Math.random()*.006};
+    group.add(m);
+  }
+  const points=[];
+  for(let i=0;i<600;i++) points.push((Math.random()-.5)*70,(Math.random()-.5)*45,(Math.random()-.5)*25);
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(points,3));
+  const pm=new THREE.PointsMaterial({color:0x5ee7ff,size:.035,transparent:true,opacity:.45});
+  scene.add(new THREE.Points(geo,pm));
+  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+  let mx=0,my=0; addEventListener('pointermove',e=>{mx=(e.clientX/innerWidth-.5)*.5;my=(e.clientY/innerHeight-.5)*.3});
+  function tick(){
+    group.rotation.y+=(mx-group.rotation.y)*.01;group.rotation.x+=(my-group.rotation.x)*.01;
+    group.children.forEach(m=>{m.rotation.x+=m.userData.s;m.rotation.y+=m.userData.s*1.4});
+    renderer.render(scene,camera);requestAnimationFrame(tick);
+  } tick();
+})();
+
+/* ---------- UI ---------- */
+const modal=document.getElementById('modal');
+function openDemo(){modal.classList.add('show');document.body.style.overflow='hidden'}
+function closeDemo(){modal.classList.remove('show');document.body.style.overflow=''}
+modal.addEventListener('click',e=>{if(e.target===modal)closeDemo()});
+addEventListener('keydown',e=>{if(e.key==='Escape')closeDemo()});
+
+function addLog(text){
+  const el=document.getElementById('log');
+  const t=new Date().toLocaleTimeString([], {hour12:false});
+  el.innerHTML=`<b>[${t}]</b> ${text}<br>`+el.innerHTML;
+}
+function pulseNodes(){
+  ['pn1','pn2','pn3','pn4'].forEach((id,i)=>{
+    setTimeout(()=>{document.getElementById(id).classList.add('active');setTimeout(()=>document.getElementById(id).classList.remove('active'),380)},i*330)
+  });
+}
+function simulate(type){
+  const packet=document.getElementById('demoPacket');
+  pulseNodes();
+  packet.style.display='block'; packet.style.left='18%'; packet.style.top='49%';
+  packet.animate([{left:'18%'},{left:'49%'},{left:'80%'},{left:'18%'}],{duration:1700,easing:'linear'});
+  const messages={
+    upload:'WRITE report.pdf → extent split → compress → encrypt → immutable segment',
+    read:'READ report.pdf → cache lookup → object fetch → decrypt → decompress',
+    delete:'UNLINK report.pdf → metadata mutation → segment reclamation path',
+    cache:'CACHE HIT → memory tier → filesystem response without object-store round trip',
+    failover:'HA TEST → leader paused → standby claims writer epoch → service resumes'
+  };
+  addLog(messages[type]); toast(messages[type]);
+  if(type==='failover') runFailover();
+}
+function toast(msg){
+  const el=document.getElementById('toast');el.textContent=msg;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600);
+}
+function simAction(type){
+  const log=document.getElementById('simLog'), packet=document.getElementById('simPacket');
+  const seq={
+    upload:['REQUEST: create /report.pdf','VFS: allocate file extents','DATA: split into 32 KiB extents','COMPRESSION: zstd-3','CRYPTO: XChaCha20-Poly1305','SEGMENT: pack frame into immutable object','STORAGE: persist to object backend','RESULT: file available'],
+    read:['REQUEST: open /report.pdf','CACHE: lookup memory tier','CACHE: miss → disk/object path','STORAGE: read segment frame','CRYPTO: verify + decrypt','COMPRESSION: decompress extent','RESULT: bytes returned to application'],
+    compress:['DATA: raw extent stream','CODEC: zstd-3 selected','FRAME: compressed extent','STATS: payload shrinks before encryption','RESULT: compressed frame ready'],
+    encrypt:['DATA: compressed frame','KDF: Argon2id-derived key material','CRYPTO: XChaCha20-Poly1305','FRAME: authenticated ciphertext','RESULT: encrypted frame ready'],
+    cache:['REQUEST: read hot file','CACHE: memory tier lookup','RESULT: HIT','LATENCY: simulated fast path','OBJECT STORE: bypassed for this read'],
+    failover:['HA: leader heartbeat lost','HA: standby verifies durable state','FENCE: writer epoch advances','TAKEOVER: standby becomes leader','RESULT: service resumes']
+  }[type];
+  log.innerHTML=seq.map((x,i)=>`<span>${i+1}. ${x}</span>`).join('<br>');
+  packet.classList.remove('go');void packet.offsetWidth;packet.classList.add('go');
+  toast(seq[seq.length-1]);
+}
+function runFailover(){
+  const leader=document.getElementById('leader'),standby=document.getElementById('standby'),status=document.getElementById('haStatus');
+  leader.classList.add('failed');status.innerHTML='REPLICATION: <b style="color:var(--amber)">TAKEOVER IN PROGRESS</b>';
+  setTimeout(()=>{standby.querySelector('b').textContent='LEADER';standby.querySelector('small').textContent='serving writes';standby.style.borderColor='rgba(101,242,174,.6)';leader.querySelector('b').textContent='STANDBY';leader.querySelector('small').textContent='recovery';status.innerHTML='REPLICATION: <b>RECOVERED / NEW LEADER</b>';toast('Standby promoted — simulated service continuity')},1400);
+}
+function selectBackend(el,name,url,auth){
+  document.querySelectorAll('.backend').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');
+  document.getElementById('backendDetail').innerHTML=`ACTIVE BACKEND → ${name}<br>URL → ${url}<br>AUTH → ${auth}`;
+}
+function makeBlocks(){
+  const a=document.getElementById('extentBlocks'),b=document.getElementById('frameBlocks');
+  for(let i=0;i<30;i++){let x=document.createElement('div');x.className='block';x.textContent='32K';a.appendChild(x)}
+  for(let i=0;i<14;i++){let x=document.createElement('div');x.className='block';x.textContent='FRAME';b.appendChild(x)}
+  setInterval(()=>{
+    [...a.children].forEach((x,i)=>setTimeout(()=>x.classList.toggle('hot'),i*35));
+    [...b.children].forEach((x,i)=>setTimeout(()=>x.classList.toggle('hot'),i*55));
+  },2800);
+}
+makeBlocks();
+
+/* gentle telemetry drift: explicitly demo telemetry, not benchmark data */
+setInterval(()=>{
+  const r=18420+Math.floor((Math.random()-.5)*900);document.getElementById('req').textContent=r.toLocaleString();
+  document.getElementById('reqLabel').textContent=(r/1000).toFixed(1)+'K/s';
+  const c=94.7+(Math.random()-.5)*1.2;document.getElementById('cacheVal').textContent=c.toFixed(1)+'%';
+},1800);
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package zerofs.admin;
+
+service AdminService {
+    rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
+    rpc RemoveDirectory(RemoveDirectoryRequest) returns (RemoveDirectoryResponse);
+}
+
+message CreateDirectoryRequest {
+    // Path from the filesystem root, e.g. /volumes/pvc-1234. Missing parent
+    // directories are created (mkdir -p semantics).
+    string path = 1;
+    uint32 mode = 2;
+    uint32 uid = 3;
+    uint32 gid = 4;
+}
+
+message CreateDirectoryResponse {
+    // True when this call created the directory at path, false when it
+    // already existed.
+    bool created = 1;
+}
+
+message RemoveDirectoryRequest {
+    string path = 1;
+}
+
+message RemoveDirectoryResponse {}

@@ -1,0 +1,22 @@
+[package]
+name = "ninep-proto"
+version = "0.4.0"
+edition = "2024"
+description = "9P2000.L wire protocol types (shared by the ZeroFS 9P server and client)"
+license = "AGPL-3.0"
+repository = "https://github.com/Barre/ZeroFS"
+homepage = "https://www.zerofs.net"
+documentation = "https://docs.rs/ninep-proto"
+keywords = ["9p", "9p2000l", "protocol", "filesystem", "zerofs"]
+categories = ["network-programming", "filesystem", "encoding"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(MODULE)"] }
+
+[features]
+default = ["std"]
+owned = ["dep:bytes"]
+std = ["owned", "bytes?/std"]
+
+[dependencies]
+bytes = { version = "1.10", default-features = false, optional = true }

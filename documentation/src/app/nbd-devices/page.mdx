@@ -1,0 +1,158 @@
+export const metadata = {
+  title: 'NBD Block Devices',
+  description:
+    'Create and connect raw block devices backed by ZeroFS over NBD.',
+}
+
+# NBD Block Devices
+
+ZeroFS exposes files under `.nbd/` as Network Block Device exports. A Linux NBD client can attach an export as `/dev/nbd*`, where it can hold a filesystem or serve as a ZFS vdev. {{ className: 'lead' }}
+
+<Warning>
+  The NBD server does not authenticate clients or encrypt traffic. Keep it on
+  loopback, a Unix socket, or a network with access controls.
+</Warning>
+
+## Configure the Server
+
+Enable a TCP listener, a Unix socket, or both:
+
+```toml
+[servers.nbd]
+addresses = ["127.0.0.1:10809"]
+unix_socket = "/tmp/zerofs-nbd.sock"
+```
+
+Omit `addresses` when only local Unix-socket access is needed. Start the server after editing the configuration:
+
+```bash
+zerofs run --config zerofs.toml
+```
+
+## Create an Export
+
+NBD exports are ordinary files in the filesystem's `.nbd` directory. Mount ZeroFS through [9P](/9p-access) or [NFS](/nfs-access), then create a sparse file of the required size:
+
+```bash
+mkdir -p /mnt/zerofs/.nbd
+truncate -s 20G /mnt/zerofs/.nbd/database
+ls -lh /mnt/zerofs/.nbd/database
+```
+
+The filename is the NBD export name. New files are available without restarting ZeroFS.
+
+## Connect from Linux
+
+Install `nbd-client`, load the kernel module, and connect the export:
+
+```bash
+sudo modprobe nbd
+sudo nbd-client 127.0.0.1 10809 /dev/nbd0 -N database
+sudo nbd-client -check /dev/nbd0
+lsblk /dev/nbd0
+```
+
+For a Unix socket:
+
+```bash
+sudo nbd-client -unix /tmp/zerofs-nbd.sock /dev/nbd0 -N database
+```
+
+Common `nbd-client` options have workload-dependent trade-offs:
+
+| Option | Effect |
+| --- | --- |
+| `-N <name>` | Required; selects the named file from `.nbd/`. |
+| `-unix <path>` | Connects through a local Unix socket instead of TCP. |
+| `-persist` | Reconnects after a dropped connection. Use it only when reconnect behavior is appropriate for the filesystem or volume manager above NBD. |
+| `-timeout <seconds>` | Sets the client I/O timeout. It must cover expected object-store and network stalls. |
+| `-connections <count>` | Opens multiple connections to the same export. Measure the workload before increasing it. |
+| `-readonly` | Attaches the export read-only. |
+| `-block-size <size>` | Requests a block size supported by the client and server. |
+
+ZeroFS advertises multi-connection support. All connections share one filesystem instance and flush path, so a flush on any connection covers completed writes from every connection.
+
+## Put a Filesystem on the Device
+
+Formatting destroys any existing contents of the export. For a new device:
+
+```bash
+sudo mkfs.ext4 /dev/nbd0
+sudo mkdir -p /mnt/database
+sudo mount /dev/nbd0 /mnt/database
+```
+
+Other Linux filesystems and volume managers can use the device if their block-size, flush, and discard behavior is compatible with NBD.
+
+## Durability Commands
+
+The NBD handshake advertises `NBD_FLAG_SEND_FLUSH`, `NBD_FLAG_SEND_FUA`, and `NBD_FLAG_CAN_MULTI_CONN`:
+
+- **FLUSH** seals and uploads the open segment, then flushes the metadata memtable. The reply is sent after both steps complete. Concurrent FLUSH and FUA requests can share one filesystem flush.
+- **FUA** on WRITE, TRIM, or WRITE_ZEROES waits for the same durability path before replying.
+- **CACHE** is accepted as a no-op.
+- **Structured replies** are not negotiated; clients use simple replies.
+
+With the default `sync_writes = false`, ordinary writes may remain buffered until the next flush. FLUSH and FUA still force the durability barrier. See [Durability and consistency](/durability) for the complete persistence model.
+
+## Discard and Zeroing
+
+ZeroFS accepts TRIM requests from filesystems and ZFS:
+
+```bash
+sudo fstrim /mnt/database
+
+# For a ZFS pool
+sudo zpool set autotrim=on mypool
+sudo zpool trim mypool
+```
+
+TRIM deletes extent pointers for fully covered extents and debits the affected segments' live-byte counters. Segment reclamation later deletes empty segments or repacks fragmented ones; object-store usage does not necessarily decrease immediately. See [Space Reclamation](/space-reclamation).
+
+WRITE_ZEROES uses the normal write path. An extent that becomes entirely zero is reduced to a pointer deletion, but partially covered extents are rewritten. TRIM is cheaper when the caller only needs to discard data.
+
+## Resize or Remove an Export
+
+A client keeps the size negotiated at connection time. Disconnect before changing the file size, then reconnect:
+
+```bash
+sudo umount /mnt/database
+sudo nbd-client -d /dev/nbd0
+
+# Grow the export. Shrinking discards data beyond the new end.
+truncate -s 40G /mnt/zerofs/.nbd/database
+
+sudo nbd-client 127.0.0.1 10809 /dev/nbd0 -N database
+```
+
+To remove an export, disconnect every client before deleting its file:
+
+```bash
+sudo nbd-client -d /dev/nbd0
+rm /mnt/zerofs/.nbd/database
+```
+
+## Diagnose a Connection
+
+```bash
+# Confirm that the kernel module is loaded
+lsmod | grep '^nbd'
+
+# List exports visible through TCP
+nbd-client -list 127.0.0.1
+
+# Keep the client in the foreground to see connection errors
+sudo nbd-client 127.0.0.1 10809 /dev/nbd0 -N database -nofork
+
+# Inspect kernel and block-device state
+dmesg | tail -50
+cat /sys/block/nbd0/stat
+```
+
+For persistent attachment, configure the service manager to start the NBD client after both the network and ZeroFS endpoint are ready, and to unmount the filesystem before disconnecting the device.
+
+<div className="not-prose mt-6 flex gap-3">
+  <Button href="/configuration" variant="outline">
+    Configuration reference
+  </Button>
+</div>

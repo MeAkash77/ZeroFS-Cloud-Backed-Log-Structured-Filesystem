@@ -1,0 +1,133 @@
+export const metadata = {
+  title: 'Quickstart',
+  description:
+    'Install ZeroFS, configure an object-store backend, and mount the filesystem.',
+}
+
+# Quickstart
+
+Install ZeroFS, configure a storage backend, start the server, and mount the filesystem. {{ className: 'lead' }}
+
+<Note>
+  To try ZeroFS without object storage, use `url = "memory:///"` and omit the `[aws]`
+  table. The filesystem is then empty after every server restart.
+</Note>
+
+## Install ZeroFS
+
+<CodeGroup>
+
+```bash {{ title: 'APT (Debian/Ubuntu)' }}
+curl -fsSL https://pkgs.zerofs.net/zerofs.gpg | sudo gpg --dearmor -o /usr/share/keyrings/zerofs.gpg
+echo "deb [signed-by=/usr/share/keyrings/zerofs.gpg] https://pkgs.zerofs.net/deb stable main" | sudo tee /etc/apt/sources.list.d/zerofs.list
+sudo apt update
+sudo apt install zerofs
+```
+
+```bash {{ title: 'DNF (Fedora/RHEL)' }}
+curl -fsSL https://pkgs.zerofs.net/zerofs.repo | sudo tee /etc/yum.repos.d/zerofs.repo
+sudo dnf install zerofs
+```
+
+```bash {{ title: 'Zypper (openSUSE)' }}
+sudo curl -fsSL https://pkgs.zerofs.net/zerofs.repo \
+  -o /etc/zypp/repos.d/zerofs.repo
+sudo zypper --gpg-auto-import-keys refresh
+sudo zypper install zerofs
+```
+
+```bash {{ title: 'Install script' }}
+curl -sSfL https://sh.zerofs.net | sh
+```
+
+```bash {{ title: 'Build from source' }}
+git clone https://github.com/Barre/ZeroFS
+cd ZeroFS/zerofs
+cargo build --release
+sudo install target/release/zerofs /usr/local/bin/zerofs
+```
+
+</CodeGroup>
+
+The package-manager installations also provide a disabled systemd unit and a configuration skeleton under `/etc/zerofs`. This quickstart runs the server directly. For containers, systemd, alternate installation directories, or a build that includes the Web UI, see [System integration](/configuration#system-integration) and [Docker](/configuration#docker).
+
+## Configure Storage
+
+Generate a configuration file:
+
+```bash
+zerofs init
+```
+
+This writes `zerofs.toml` in the current directory, overwriting a file with that name if one already exists. Open it in your preferred editor and set the storage URL, encryption password, and credentials for that backend. You can put values directly in the file or keep its environment-variable placeholders. See the [configuration reference](/configuration#storage-backends) for S3-compatible, Azure, and GCS settings.
+
+## Start the Server
+
+```bash
+zerofs run --config zerofs.toml
+```
+
+Keep that process running. The first start creates the filesystem metadata at the configured storage path.
+
+## Mount the Filesystem
+
+Open another terminal. On Linux, use the [native kernel client](/kernel-client) when a module is available for your kernel. Install `zerofs-kernel-client` before using the first command below. The bundled FUSE client works without the ZeroFS kernel module. macOS and Linux can also use NFS.
+
+<CodeGroup>
+
+```bash {{ title: 'Linux (native kernel client)' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t zerofs \
+  -o consistency=relaxed,msize=10485760 \
+  127.0.0.1:5564 /mnt/zerofs
+```
+
+```bash {{ title: 'Linux (bundled FUSE client)' }}
+mkdir -p "$HOME/mnt/zerofs"
+zerofs mount 127.0.0.1:5564 "$HOME/mnt/zerofs"
+```
+
+```bash {{ title: 'Linux (NFS)' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t nfs \
+  -o vers=3,nolock,tcp,port=2049,mountport=2049 \
+  127.0.0.1:/ /mnt/zerofs
+```
+
+```bash {{ title: 'macOS (NFS)' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t nfs \
+  -o vers=3,nolocks,tcp,port=2049,mountport=2049 \
+  127.0.0.1:/ /mnt/zerofs
+```
+
+</CodeGroup>
+
+The native client is an out-of-tree module managed by DKMS. ZeroFS normally supplies a signed, CI-tested module for the exact distribution kernel, with local source compilation as a fallback; see [Native kernel client](/kernel-client) for compatibility and installation. The FUSE command stays in the foreground; press `Ctrl+C` to unmount. For stock v9fs, Unix sockets, or FUSE client controls, see [9P file access](/9p-access). For NFS mount behavior and limitations, see [NFS file access](/nfs-access).
+
+## Verify the Mount
+
+Change to the mount point you chose, then write and read a file:
+
+```bash
+cd /path/to/mount
+echo "Hello from ZeroFS" > hello.txt
+cat hello.txt
+```
+
+## Monitor the Server
+
+The generated configuration enables the RPC listener used by the terminal dashboard:
+
+```bash
+zerofs monitor --config zerofs.toml
+```
+
+See [Monitoring and tracing](/monitoring) for per-operation and object-store request traces.
+
+## Related Guides
+
+- [Configuration reference](/configuration) for Azure, GCS, S3-compatible stores, quotas, and server settings
+- [NBD block devices](/nbd-devices) for raw block storage
+- [Encryption](/encryption) for key handling and password changes
+- [Caching](/caching) for cache sizing and behavior

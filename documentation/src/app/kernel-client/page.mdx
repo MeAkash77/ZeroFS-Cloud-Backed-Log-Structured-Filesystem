@@ -1,0 +1,247 @@
+export const metadata = {
+  title: 'Native Kernel Client',
+  description: 'Install and mount ZeroFS with the native Linux kernel module.',
+}
+
+export const sections = [
+  { title: 'How it works', id: 'how-it-works' },
+  { title: 'Compatibility', id: 'compatibility' },
+  { title: 'Installation', id: 'installation' },
+  { title: 'Secure Boot', id: 'secure-boot' },
+  { title: 'Mounting', id: 'mounting' },
+  { title: 'Kernels without Rust', id: 'kernels-without-rust' },
+]
+
+# Native Kernel Client
+
+The native client is an out-of-tree Linux module. It registers the `zerofs` filesystem with VFS and speaks `9P2000.L.Z` over TCP or a Unix socket. It is the fastest ZeroFS mount path when a module is available for the running kernel; use [`zerofs mount`](/9p-access#mounting-with-zerofs-mount) otherwise. {{ className: 'lead' }}
+
+## How it works {{ id: 'how-it-works' }}
+
+`zerofs.ko` connects Linux VFS and netfslib directly to the ZeroFS 9P server. Relaxed consistency uses the page cache, readahead, writeback, writable `mmap`, and netfslib direct I/O. The client also supports `fallocate`, `SEEK_DATA`, `SEEK_HOLE`, POSIX record locks, `flock`, and durable `fsync`.
+
+| | Native kernel client | `zerofs mount` |
+| --- | --- | --- |
+| Path | VFS and netfslib | VFS, FUSE, userspace client |
+| Protocol | `9P2000.L.Z` | `9P2000.L.Z` |
+| Install | Signed exact-kernel module managed by DKMS; root required | Included in the `zerofs` binary |
+| Reconnect | Waits up to `reconnect_grace_ms`, 120 seconds by default | Waits for a server; ambiguous mutation retries stop after 120 seconds |
+| HA discovery | Rotates between two configured endpoints | Probes both endpoints concurrently |
+
+The native path avoids the `/dev/fuse` handoff and has lower client-side overhead. Workload and cache state determine the end-to-end difference.
+
+Stock Linux v9fs is also supported. It needs no ZeroFS module, but uses standard `9P2000.L` and does not implement the private reconnect or metadata operations. See [9P File Access](/9p-access).
+
+## Compatibility {{ id: 'compatibility' }}
+
+Linux 6.18 is the minimum supported kernel. DKMS excludes module builds below
+that floor and applies no version exclusion above it. Every otherwise eligible
+kernel presented to DKMS is attempted, whether or not CI has certified it yet.
+The target must also provide:
+
+- x86-64 or little-endian arm64;
+- `CONFIG_MODULES`;
+- `CONFIG_NETFS_SUPPORT`;
+- `CONFIG_UNIX`;
+- `CONFIG_FILE_LOCKING`;
+- `CONFIG_RANDSTRUCT=n` and `CONFIG_GCC_PLUGIN_RANDSTRUCT=n`.
+
+ZeroFS continuously builds, boot-tests, and publishes modules for these kernel channels:
+
+| Distribution | x86-64 | arm64 |
+| --- | --- | --- |
+| Ubuntu 26.04, generic | yes | yes |
+| Ubuntu 24.04, HWE generic | yes | yes |
+| Debian 13 backports | yes | yes |
+| Fedora 43 | yes | yes |
+| Fedora 44 | yes | yes |
+| openSUSE Tumbleweed | yes | — |
+
+Every discovered kernel is built and boot-tested with a ZeroFS mount and basic
+I/O before its compatibility lock is merged. Merging the lock triggers module
+publication for the latest stable ZeroFS package.
+
+Only exact distribution header-package identities discovered for the channels
+above receive published modules. Derivative-specific, custom, and third-party
+kernel packages (including ELRepo kernels) use the optional source fallback
+instead. If its matching source and toolchain are not already installed, DKMS
+fails that eligible build and the distribution may leave the kernel or ZeroFS
+package transaction incomplete. Use `zerofs mount` when that policy is
+unsuitable.
+
+<Note>
+The Ubuntu 24.04 CI channel tracks HWE. Server installations default to the
+unsupported 6.8 GA kernel; Desktop installations track HWE. Install and boot
+a supported HWE kernel before mounting. The ZeroFS package does not replace or
+hold the distribution kernel.
+</Note>
+
+Debian 13, Rocky Linux 9 and 10, and openSUSE Leap 16 ship kernels older than
+6.18.
+
+## Installation {{ id: 'installation' }}
+
+### Package
+
+Kernel and userspace packages share the standard ZeroFS repository. Configure
+it once, then install `zerofs` and the generic kernel-client package:
+
+<CodeGroup>
+
+```bash {{ title: 'Debian / Ubuntu' }}
+curl -fsSL https://pkgs.zerofs.net/zerofs.gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/zerofs.gpg
+echo 'deb [signed-by=/usr/share/keyrings/zerofs.gpg] https://pkgs.zerofs.net/deb stable main' \
+  | sudo tee /etc/apt/sources.list.d/zerofs.list >/dev/null
+sudo apt update
+sudo apt install zerofs zerofs-kernel-client
+```
+
+```bash {{ title: 'Fedora' }}
+curl -fsSL https://pkgs.zerofs.net/zerofs.repo \
+  | sudo tee /etc/yum.repos.d/zerofs.repo >/dev/null
+sudo dnf install zerofs zerofs-kernel-client
+```
+
+```bash {{ title: 'openSUSE' }}
+sudo curl -fsSL https://pkgs.zerofs.net/zerofs.repo \
+  -o /etc/zypp/repos.d/zerofs.repo
+sudo zypper --gpg-auto-import-keys refresh
+sudo zypper install zerofs zerofs-kernel-client
+```
+
+</CodeGroup>
+
+`zerofs-kernel-client` registers with DKMS and first downloads the exact,
+signed module that ZeroFS CI boot-tested for the installed kernel package. It
+uses a pinned public certificate shipped in the package to authenticate the
+module, its exact header-package identity, architecture, and ABI before DKMS
+installs it. The identity comes from the installed header package rather than
+the current OS release, so retained kernels keep working after a distribution
+upgrade. `mount -t zerofs` then loads the module through its filesystem alias.
+Matching kernel headers are required so DKMS can identify and manage the
+kernel.
+
+Installing the package supplies the module for the running and newest installed
+kernels that already have headers. With no eligible header tree, it registers
+the source, prints a warning, and leaves the package configured so a later
+distribution DKMS hook can build it. Later kernel installations trigger DKMS
+automatically. When a module is unpublished or temporarily unreachable, DKMS
+attempts a source build using the matching compiler, bindgen, and Rust metadata
+or distribution kernel source, but never downloads them. If those inputs are
+also missing, the eligible DKMS build fails rather than completing without a
+ZeroFS module; kernels below the version floor are still skipped.
+Authentication, compilation, and installation errors are hard failures too.
+Debian and Ubuntu normally leave kernel package configuration incomplete after
+such a failure, while Fedora and openSUSE may finish the transaction. Once the
+module or source inputs are available, retry with `sudo dkms autoinstall` and
+finish any incomplete package configuration. Check `dkms status` before
+rebooting and keep the preceding kernel as a fallback; `zerofs mount` remains
+available without the module. The package does not install or hold the
+distribution kernel. Use the same ZeroFS release on the server.
+
+The build wrapper selects the appropriate path automatically:
+
+- kernels with `CONFIG_RUST=y` and packaged Rust metadata use the normal
+  external-module build;
+- kernels with `CONFIG_RUST=y` but no packaged metadata regenerate it from the
+  distribution kernel source;
+- compatible x86-64 kernels with `CONFIG_RUST=n` use the self-contained build
+  described below.
+
+### Manual source build
+
+A source build requires a kernel with `CONFIG_RUST=y`, its matching `rust/libkernel.rmeta`, kernel headers, and the compiler and bindgen versions used for that kernel. `CONFIG_MODVERSIONS=y` also requires `Module.symvers` and `CONFIG_EXTENDED_MODVERSIONS=y`.
+
+```bash
+cd ZeroFS/kernel
+make KDIR=/lib/modules/"$(uname -r)"/build
+
+module_path=$(make -s \
+  KDIR=/lib/modules/"$(uname -r)"/build module-path)
+sudo install -D -m 0644 "$module_path" \
+  "/lib/modules/$(uname -r)/updates/zerofs/zerofs.ko"
+sudo depmod -a "$(uname -r)"
+sudo modprobe zerofs
+```
+
+Verify the installation:
+
+```bash
+modinfo zerofs
+grep zerofs /proc/filesystems
+```
+
+## Secure Boot {{ id: 'secure-boot' }}
+
+Downloaded modules carry a ZeroFS signature used to authenticate the artifact.
+DKMS preserves it and may append its machine-local key when module signing is
+configured by the distribution. The ZeroFS signature authenticates the
+download; it does not add the ZeroFS certificate to the kernel's Secure Boot
+trust store. Check Secure Boot and the installed module:
+
+```bash
+mokutil --sb-state
+modinfo -F signer zerofs
+```
+
+If Secure Boot rejects the module, follow the distribution's DKMS/MOK prompt
+to enroll that local key, then reboot and run `sudo modprobe zerofs`. The key
+and enrollment command are distribution-specific; the ZeroFS package never
+enrolls a key automatically. Enrollment is not required when Secure Boot is
+disabled or the local DKMS key is already
+trusted. MOK enrollment requires UEFI boot through the distribution's shim and
+console access; other boot chains need their own key-enrollment procedure.
+
+## Mounting {{ id: 'mounting' }}
+
+The source is an IP-literal TCP endpoint, a Unix socket, or a comma-separated HA endpoint set.
+
+<CodeGroup>
+
+```bash {{ title: 'TCP' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t zerofs \
+  -o consistency=relaxed,msize=10485760 \
+  127.0.0.1:5564 /mnt/zerofs
+```
+
+```bash {{ title: 'Unix socket' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t zerofs \
+  -o consistency=relaxed \
+  /run/zerofs/9p.sock /mnt/zerofs
+```
+
+```bash {{ title: 'HA pair' }}
+sudo mkdir -p /mnt/zerofs
+sudo mount -t zerofs \
+  -o consistency=relaxed \
+  10.0.0.10:5564,10.0.0.11:5564 /mnt/zerofs
+```
+
+</CodeGroup>
+
+| Option | Default | Values |
+| --- | --- | --- |
+| `consistency=MODE` | `relaxed` | `relaxed` caches metadata and data for one second and supports `mmap`; `strict` revalidates remotely and uses unbuffered I/O |
+| `msize=N` | `10485760` | 4,096 bytes through 10 MiB |
+
+Unmount with `sudo umount /mnt/zerofs`.
+
+## Kernels without Rust {{ id: 'kernels-without-rust' }}
+
+ZeroFS can build an x86-64 module for a compatible kernel with `CONFIG_RUST=n`.
+The DKMS wrapper compiles the matching kernel's Rust support and ZeroFS
+together, internalizes the Rust code, and runs the result through the target
+kernel's normal module build. The resulting module imports C kernel symbols
+and does not require Rust support from the running kernel.
+
+This path uses the configured headers tree for `.config`, generated headers,
+and `Module.symvers`, plus the separately packaged distribution kernel source
+and matching Rust, C, and LLVM tools. These must be installed through the
+package manager rather than downloaded by the DKMS hook. The self-contained
+path is narrower than the normal Rust build, currently supports x86-64 only,
+and does not support kernels older than Linux 6.18.
+
+CI tests this path by booting an upstream Linux 6.18 kernel built with `CONFIG_RUST=n`.

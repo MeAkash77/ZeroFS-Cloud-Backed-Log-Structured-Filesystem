@@ -1,0 +1,81 @@
+use crate::db::{Db, Transaction};
+use crate::fs::errors::FsError;
+use crate::fs::inode::InodeId;
+use crate::fs::key_codec::{KeyCodec, KeyPrefix, ParsedKey};
+use bytes::Bytes;
+use futures::Stream;
+use std::pin::Pin;
+use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct TombstoneEntry {
+    pub key: Bytes,
+    pub inode_id: InodeId,
+    pub remaining_size: u64,
+}
+
+#[derive(Clone)]
+pub struct TombstoneStore {
+    db: Arc<Db>,
+    key_codec: Arc<KeyCodec>,
+}
+
+impl TombstoneStore {
+    pub fn new(db: Arc<Db>, key_codec: Arc<KeyCodec>) -> Self {
+        Self { db, key_codec }
+    }
+
+    pub fn add(&self, txn: &mut Transaction, inode_id: InodeId, size: u64) {
+        let (timestamp, _) = crate::fs::get_current_time();
+        let key = self.key_codec.tombstone_key(timestamp, inode_id);
+        txn.put_bytes(&key, KeyCodec::encode_tombstone_size(size));
+    }
+
+    pub fn update(&self, txn: &mut Transaction, key: &Bytes, new_size: u64) {
+        txn.put_bytes(key, KeyCodec::encode_tombstone_size(new_size));
+    }
+
+    pub fn remove(&self, txn: &mut Transaction, key: &Bytes) {
+        txn.delete_bytes(key);
+    }
+
+    pub async fn list(
+        &self,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<TombstoneEntry, FsError>> + Send + '_>>, FsError>
+    {
+        let (start, end) = self.key_codec.prefix_range(KeyPrefix::Tombstone);
+        let codec = self.key_codec.clone();
+
+        let iter = self
+            .db
+            .scan(start..end)
+            .await
+            .map_err(|_| FsError::IoError)?;
+
+        Ok(Box::pin(futures::stream::unfold(
+            (iter, codec),
+            |(mut iter, codec)| async move {
+                match futures::StreamExt::next(&mut iter).await {
+                    Some(Ok((key, value))) => match codec.parse_key(&key) {
+                        ParsedKey::Tombstone { inode_id } => {
+                            match KeyCodec::decode_tombstone_size(&value) {
+                                Ok(remaining_size) => Some((
+                                    Ok(TombstoneEntry {
+                                        key,
+                                        inode_id,
+                                        remaining_size,
+                                    }),
+                                    (iter, codec),
+                                )),
+                                Err(e) => Some((Err(e), (iter, codec))),
+                            }
+                        }
+                        _ => Some((Err(FsError::InvalidData), (iter, codec))),
+                    },
+                    Some(Err(_)) => Some((Err(FsError::IoError), (iter, codec))),
+                    None => None,
+                }
+            },
+        )))
+    }
+}
